@@ -43,7 +43,8 @@ build_gif <- function(
     delay = 1
 ) {
     # Check input and output files have correct extensions
-    assert_io_paths(input, c("rmd", "html", "pdf"), output_file, "gif")
+    assert_path_ext(input, c("rmd", "html", "pdf"))
+    assert_path_ext(output_file, "gif")
 
     # Build input and output paths
     paths <- build_paths(input, output_file)
@@ -58,7 +59,7 @@ build_gif <- function(
     input <- paths$input$pdf
     output_file <- paths$output$gif
     proc <- cli_build_start(input, output_file)
-    pngs <- pdf_to_pngs(input, density)
+    pngs <- pdf_to_imgs(input, density)
 
     # Keep only selected slides by number
     if (!is.null(slides)) {

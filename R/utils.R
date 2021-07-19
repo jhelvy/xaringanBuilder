@@ -1,11 +1,8 @@
-assert_io_paths <- function(input, input_ext, output_file, output_file_ext) {
-    assert_path_ext(input, input_ext, arg = "input")
-    if (!is.null(output_file)) {
-        assert_path_ext(output_file, output_file_ext, arg = "output_file")
+assert_path_ext <- function(path, expected_ext, arg = NULL) {
+    if (is.null(arg)) arg <- deparse(substitute(path))
+    if (is.null(path)) {
+        stop("`", arg, "` must be a path with extension ", expected_ext, call. = FALSE)
     }
-}
-
-assert_path_ext <- function(path, expected_ext, arg) {
     if (!test_path_ext(path, expected_ext)) {
         expected_ext <- paste0(".", expected_ext, collapse = ", ")
         stop("`", arg, "` must have extension: ", expected_ext, call. = FALSE)
@@ -13,7 +10,26 @@ assert_path_ext <- function(path, expected_ext, arg) {
 }
 
 test_path_ext <- function(path, expected_ext) {
-    return(tolower(fs::path_ext(path)) %in% expected_ext)
+    tolower(fs::path_ext(path)) %in% expected_ext
+}
+
+assert_path_exists <- function(path, arg = NULL, dir_ok = FALSE) {
+    if (is.null(arg)) arg <- deparse(substitute(path))
+
+    if (is.null(path)) {
+        stop("`", arg, "` must be a path", call. = FALSE)
+    }
+
+    if (
+        is_url(path) ||
+        (dir_ok && fs::dir_exists(path)) ||
+        # don't count directories if !dir_ok
+        (!fs::is_dir(path) && fs::file_exists(path))
+    ) {
+        return()
+    }
+
+    stop("`", arg, "` doesn't exist: ", path, call. = FALSE)
 }
 
 assert_chrome_installed <- function() {
@@ -41,6 +57,80 @@ assert_chromote <- function() {
     if (utils::packageVersion("chromote") < package_version("0.0.0.9003")) {
         warning("Please upgrade `chromote` to version 0.0.0.9003 or later.")
     }
+}
+
+path_from <- function(path, to_ext, temporary = FALSE, dir = NULL) {
+    path_is_url <- is_url(path)
+    temporary <- isTRUE(temporary)
+
+    if (identical(tolower(to_ext), "url")) {
+        if (path_is_url) {
+            return(path)
+        }
+        temporary <- FALSE
+    }
+
+    if (is.null(dir)) {
+        dir <-
+            if (path_is_url) {
+                warning("No `dir` provided, using working directory.")
+                fs::path_wd()
+            } else {
+                fs::path_dir(fs::path_abs(path))
+            }
+    }
+
+    path_abs <- if (!path_is_url) fs::path_abs(path)
+    path_file <-
+        if (temporary) {
+            fs::path_file(fs::file_temp("xaringanBuilder_"))
+        } else {
+            fs::path_file(path)
+        }
+
+    path_new <- switch(
+        tolower(to_ext),
+        social = fs::path(
+            dir,
+            append_to_file_path(fs::path_ext_set(path_file, "png"), "_social")
+        ),
+        url = fs::path(dir, path_file),
+        html = ,
+        pdf = ,
+        png = ,
+        gif = ,
+        pptx = ,
+        mp4 = ,
+        zip = fs::path(dir, fs::path_ext_set(path_file, to_ext)),
+        stop("Unsupported file type: ", to_ext)
+    )
+
+    path_new <- fs::path_abs(path_new)
+
+    if (to_ext == "url") {
+        path_new <- paste0("file://", path_new)
+    }
+
+    if (temporary) {
+        # when the calling function exits, delete the temp file
+        path_new_rel <- fs::path_rel(path_new, fs::path_wd())
+        msg <- cli::format_inline(
+            "Removed temporary {.file {path_new_rel}}", .envir = environment()
+        )
+        withr::defer({
+            unlink(path_new)
+            if (tolower(to_ext) == "html" && temporary) {
+                # clean up supporting files for temp HTML
+                support_dir <- paste0(fs::path_ext_remove(path_new), "_files")
+                if (fs::dir_exists(support_dir)) {
+                    fs::dir_delete(support_dir)
+                }
+            }
+            cli::cli_alert_info(msg)
+        }, envir = parent.frame())
+    }
+
+    path_new
 }
 
 build_paths <- function(input, output_file = NULL) {
@@ -105,6 +195,15 @@ is_url <- function(input) {
   return(grepl("^(ht|f)tp", tolower(input)))
 }
 
+in_same_directory <- function(x, y) {
+    if (is_url(x) || is_url(y)) {
+        return(FALSE)
+    }
+    paths <- fs::path_abs(c(x, y))
+    common <- fs::path_common(paths)
+    all(common == fs::path_dir(paths))
+}
+
 append_to_file_path <- function(path, s) {
     # Appends s to path before the extension, e.g.
     # path:    "file.png"
@@ -139,21 +238,21 @@ cli_build_failed <- function(id) {
   }
 }
 
-pdf_to_pngs <- function(input, density) {
-    return(magick::image_read_pdf(input, density = density))
+pdf_to_imgs <- function(input, density) {
+    magick::image_read_pdf(input, density = density)
 }
 
 build_to_pdf <- function(
-  input,
-  paths,
-  complex_slides,
-  partial_slides,
-  delay
+    input,
+    paths,
+    complex_slides,
+    partial_slides,
+    delay
 ) {
     if (test_path_ext(input, "rmd")) {
         build_pdf(
-          input = paths$input$rmd,
-          output_file = paths$output$pdf,
+            input = paths$input$rmd,
+            output_file = paths$output$pdf,
           complex_slides, partial_slides, delay)
     } else if (test_path_ext(input, "html")) {
         build_pdf(

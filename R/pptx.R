@@ -45,7 +45,8 @@ build_pptx <- function(
     }
 
     # Check input and output files have correct extensions
-    assert_io_paths(input, c("rmd", "html", "pdf"), output_file, "pptx")
+    assert_path_ext(input, c("rmd", "html", "pdf"))
+    assert_path_ext(output_file, "pptx")
 
     # Build input and output paths
     paths <- build_paths(input, output_file)
@@ -60,7 +61,7 @@ build_pptx <- function(
     input <- paths$input$pdf
     output_file <- paths$output$pptx
     proc <- cli_build_start(input, output_file)
-    pngs <- pdf_to_pngs(input, density)
+    pngs <- pdf_to_imgs(input, density)
 
     # Keep only selected slides by number
     if (!is.null(slides)) {
